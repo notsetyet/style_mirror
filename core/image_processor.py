@@ -9,13 +9,14 @@ StyleMirror - 视觉特征提取模块
 3. 支持 base_url 参数适配 API 代理/国产模型
 4. 增强业务返回字段（色彩板、场景关键词）
 5. 优化图片压缩以节省 Token
+6. 支持 python-dotenv 加载 .env 配置
 
 Author: StyleMirror Team
-Version: v2.0 (Refactored)
+Version: v2.1 (Dotenv Integration)
 """
 
 from PIL import Image
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import io
 import random
 import base64
@@ -24,6 +25,14 @@ import os
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
+
+# 加载 .env 环境变量
+from dotenv import load_dotenv
+
+# 尝试从项目根目录加载 .env
+_env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 from openai import OpenAI, APIError, APITimeoutError, RateLimitError
 
@@ -49,6 +58,56 @@ MAX_RETRIES = 3                 # 最大重试次数
 RETRY_DELAY = 1.0               # 重试间隔（秒）
 MODEL_TEMPERATURE = 0.7         # 模型温度
 MAX_TOKENS = 500                # 最大输出 Token
+
+# 默认模型配置
+DEFAULT_MODEL = "gpt-4o-mini"   # 默认模型名称
+
+
+# ============================================
+# 全局配置检查函数
+# ============================================
+
+def check_api_config() -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    检查 API 配置状态
+    
+    Returns:
+        Tuple[bool, str, Dict]: 
+            - is_ready: 是否就绪
+            - mode: 模式描述 ("real_ai" / "mock_demo")
+            - config_info: 配置详情字典
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    
+    config_info = {
+        "has_api_key": bool(api_key),
+        "api_key_prefix": api_key[:7] + "..." if api_key and len(api_key) > 7 else None,
+        "has_base_url": bool(base_url),
+        "base_url": base_url if base_url else "https://api.openai.com/v1",
+        "model": DEFAULT_MODEL,
+    }
+    
+    if api_key:
+        return True, "real_ai", config_info
+    else:
+        return False, "mock_demo", config_info
+
+
+def get_api_status_message() -> str:
+    """
+    获取 API 状态的友好提示信息
+    
+    Returns:
+        str: 状态提示文本
+    """
+    is_ready, mode, config = check_api_config()
+    
+    if is_ready:
+        base_url_display = config.get("base_url", "default")
+        return f"✅ 当前处于：真实 AI 模式 | 模型: {config['model']} | 端点: {base_url_display}"
+    else:
+        return "💡 当前处于：演示 Mock 模式 | 配置 .env 文件中的 OPENAI_API_KEY 以启用真实 AI"
 
 # ============================================
 # 小红书热门风格标签库
@@ -78,13 +137,13 @@ VIBE_SYSTEM_PROMPT = """你是小红书「点点 Agent」的视觉分析引擎�
 
 ## 🎯 输出要求
 你必须返回一个合法的 JSON 对象，格式如下：
-{
+{{
     "vibe_tag": "4字风格标签",
     "description": "风格描述文案（小红书语气）",
     "color_palette": ["#色号1", "#色号2", "#色号3"],
     "scene_keywords": ["场景词1", "场景词2"],
     "confidence": 0.85
-}
+}}
 
 ## 🎨 字段说明
 1. vibe_tag: 4字风格标签，从以下热门风格中选择或自定义：
@@ -221,7 +280,7 @@ class MultiModalModel:
     
     def __init__(
         self,
-        model_name: str = "gpt-4o-mini",
+        model_name: str = None,
         api_key: str = None,
         base_url: str = None,
         timeout: float = API_TIMEOUT,
@@ -230,14 +289,22 @@ class MultiModalModel:
         """
         初始化多模态模型
         
+        配置优先级：
+        - api_key: 参数 > OPENAI_API_KEY 环境变量
+        - base_url: 参数 > OPENAI_BASE_URL 环境变量 > OpenAI 默认
+        - model_name: 参数 > DEFAULT_MODEL 常量
+        
         Args:
             model_name: 模型名称，默认 gpt-4o-mini（性价比之选）
             api_key: API Key，未传入则从环境变量读取
             base_url: API 基础 URL（支持代理/国产模型中转）
             timeout: 请求超时时间（秒）
             max_retries: 最大重试次数
+            
+        Raises:
+            ValueError: API Key 不存在时抛出，触发 Mock 降级
         """
-        self.model_name = model_name
+        self.model_name = model_name or DEFAULT_MODEL
         self.timeout = timeout
         self.max_retries = max_retries
         
@@ -245,17 +312,25 @@ class MultiModalModel:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "未找到 API Key，请通过参数传入或设置环境变量 OPENAI_API_KEY"
+                "未找到 API Key，请通过参数传入或在 .env 中设置 OPENAI_API_KEY"
             )
         
+        # Base URL 读取优先级：参数 > 环境变量 > OpenAI 默认
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
+        
         # 初始化 OpenAI 客户端
-        # 支持 base_url 参数，方便接入国产模型中转接口
         client_kwargs = {"api_key": self.api_key, "timeout": self.timeout}
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
             
         self.client = OpenAI(**client_kwargs)
-        logger.info(f"MultiModalModel 初始化完成: model={model_name}, base_url={base_url or 'default'}")
+        
+        # 日志记录初始化信息
+        logger.info(
+            f"MultiModalModel 初始化完成: model={self.model_name}, "
+            f"base_url={self.base_url or 'default'}, "
+            f"api_key_prefix={self.api_key[:7]}..."
+        )
     
     def analyze_image(
         self,
@@ -593,6 +668,9 @@ __all__ = [
     "preprocess_image",
     "analyze_vibe",
     "analyze_vibe_legacy",
+    # 配置检查
+    "check_api_config",
+    "get_api_status_message",
     # 扩展接口
     "extract_vibe_features",
     "analyze_outfit",
@@ -604,4 +682,5 @@ __all__ = [
     "VibeResult",
     # 常量
     "XHS_VIBE_TAGS",
+    "DEFAULT_MODEL",
 ]

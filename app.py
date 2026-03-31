@@ -4,11 +4,11 @@ StyleMirror - 小红书点点 Agent 多模态试用原型
 Streamlit 主程序入口
 
 视觉风格：完美适配小红书（XHS）设计语言
-核心组件：Color Lab / Scene Tags / 点点打字机
-布局结构：侧边栏 API 配置 + 双列主界面
+核心组件：Color Lab / Scene Tags / 点点打字机 / 匹配度可视化
+布局结构：侧边栏 API 配置 + 双列主界面 + 图文混合搜索
 
 Author: StyleMirror Team
-Version: v3.0 (Frontend Redesign)
+Version: v4.1 (Dotenv Integration + API 状态显示)
 """
 
 import streamlit as st
@@ -24,8 +24,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 # 导入自定义模块
 from components.ui_styles import apply_custom_styles
 from prompts.agent_prompts import DIANDIAN_SYSTEM_PROMPT
-from core.image_processor import preprocess_image, analyze_vibe
-from core.retriever import get_matching_notes
+from core.image_processor import (
+    preprocess_image, 
+    analyze_vibe,
+    check_api_config,
+    get_api_status_message
+)
+from core.retriever import get_matching_notes, get_matching_notes_v2
 
 # ============================================
 # 页面配置（必须放在最前面）
@@ -60,6 +65,8 @@ def inject_xhs_styles():
             --xhs-text-secondary: #666666;
             --xhs-gray: #999999;
             --xhs-border: #EEEEEE;
+            --xhs-green: #52C41A;
+            --xhs-orange: #FA8C16;
         }
         
         /* ========== 全局样式 ========== */
@@ -111,6 +118,49 @@ def inject_xhs_styles():
         .upload-zone:hover {
             border-color: var(--xhs-red-dark);
             background: linear-gradient(135deg, #FFE8E8 0%, #FFF5F5 100%);
+        }
+        
+        /* ========== 用户输入区 ========== */
+        .user-input-container {
+            background: linear-gradient(135deg, #FFF9E6 0%, #FFFFFF 100%);
+            border-radius: 15px;
+            padding: 16px;
+            margin: 16px 0;
+            border: 1px solid #FFE7BA;
+        }
+        
+        .user-input-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* ========== 意图修正按钮组 ========== */
+        .intent-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .intent-btn {
+            background: #F5F5F5;
+            border: 1px solid #E8E8E8;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 13px;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .intent-btn:hover {
+            background: var(--xhs-red);
+            color: white;
+            border-color: var(--xhs-red);
         }
         
         /* ========== 风格标签 ========== */
@@ -340,6 +390,7 @@ def inject_xhs_styles():
             margin-bottom: 16px;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
             transition: all 0.3s ease;
+            position: relative;
         }
         
         .note-card:hover {
@@ -383,6 +434,50 @@ def inject_xhs_styles():
             gap: 16px;
             font-size: 12px;
             color: var(--xhs-gray);
+        }
+        
+        /* ========== 匹配度徽章 ========== */
+        .match-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .match-badge.high {
+            background: linear-gradient(135deg, #52C41A 0%, #73D13D 100%);
+            color: white;
+        }
+        
+        .match-badge.medium {
+            background: linear-gradient(135deg, #FA8C16 0%, #FFA940 100%);
+            color: white;
+        }
+        
+        .match-badge.low {
+            background: #F5F5F5;
+            color: #999;
+        }
+        
+        .match-badge-bar {
+            width: 60px;
+            height: 4px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        
+        .match-badge-fill {
+            height: 100%;
+            background: white;
+            border-radius: 2px;
         }
         
         /* ========== 置信度进度条 ========== */
@@ -444,6 +539,34 @@ def inject_xhs_styles():
             height: 1px;
             background: var(--xhs-border);
             margin: 20px 0;
+        }
+        
+        /* ========== 搜索按钮 ========== */
+        .search-button-container {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        /* ========== 检索状态 ========== */
+        .search-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: #F6FFED;
+            border-radius: 10px;
+            margin-bottom: 16px;
+            border: 1px solid #B7EB8F;
+        }
+        
+        .search-status-icon {
+            font-size: 18px;
+        }
+        
+        .search-status-text {
+            font-size: 13px;
+            color: #52C41A;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -578,6 +701,39 @@ def typewriter_effect(text: str, placeholder, speed: float = 0.02):
     ''', unsafe_allow_html=True)
 
 
+def render_match_badge(hybrid_score: float):
+    """
+    渲染匹配度徽章
+    
+    根据得分显示不同样式：
+    - 高匹配 (>= 70): 绿色
+    - 中匹配 (>= 40): 橙色
+    - 低匹配 (< 40): 灰色
+    
+    Args:
+        hybrid_score: 混合得分 (0-100+)
+    """
+    # 归一化到 0-100
+    score = min(100, max(0, hybrid_score))
+    
+    if score >= 70:
+        badge_class = "high"
+        icon = "🎯"
+    elif score >= 40:
+        badge_class = "medium"
+        icon = "💫"
+    else:
+        badge_class = "low"
+        icon = "📌"
+    
+    st.markdown(f'''
+    <div class="match-badge {badge_class}">
+        <span>{icon}</span>
+        <span>{int(score)}%</span>
+    </div>
+    ''', unsafe_allow_html=True)
+
+
 # ============================================
 # 单品卡片渲染
 # ============================================
@@ -620,7 +776,7 @@ def render_item_card(item: dict, note_id: str):
 
 def render_note_card(note: dict, show_items: bool = True):
     """
-    渲染笔记卡片
+    渲染笔记卡片（带匹配度徽章）
     
     Args:
         note: 笔记数据
@@ -632,14 +788,20 @@ def render_note_card(note: dict, show_items: bool = True):
     collects = note.get("collects", 0)
     items = note.get("items", [])
     is_default = note.get("is_default", False)
+    hybrid_score = note.get("hybrid_score", note.get("match_score", 0))
     
     # 作者头像首字母
     avatar_text = author[1] if len(author) > 1 else "👤"
     
     default_badge = "🔥 熱門推薦" if is_default else ""
     
+    # 卡片容器（带匹配度徽章）
     st.markdown(f'''
     <div class="note-card">
+        <div class="match-badge {"low" if is_default else ("high" if hybrid_score >= 70 else "medium")}">
+            <span>{"🎯" if hybrid_score >= 70 else "💫" if hybrid_score >= 40 else "📌"}</span>
+            <span>{int(min(100, hybrid_score))}% 匹配</span>
+        </div>
         <div class="note-header">
             <div class="note-author">
                 <div class="author-avatar">{avatar_text}</div>
@@ -651,6 +813,7 @@ def render_note_card(note: dict, show_items: bool = True):
         <div class="note-footer">
             <span>❤️ {likes:,}</span>
             <span>⭐ {collects:,}</span>
+            <span>📊 得分: {hybrid_score:.1f}</span>
         </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -742,6 +905,33 @@ def render_empty_state():
 
 
 # ============================================
+# 意图修正预设词
+# ============================================
+
+INTENT_PRESETS = [
+    {"label": "颜色再深一点", "value": "颜色再深一点"},
+    {"label": "更简约一点", "value": "更简约一点"},
+    {"label": "适合约会", "value": "适合约会"},
+    {"label": "适合通勤", "value": "适合通勤上班"},
+    {"label": "更休闲", "value": "更休闲舒适"},
+    {"label": "更正式", "value": "更正式得体"},
+]
+
+
+def render_intent_buttons():
+    """渲染意图修正按钮"""
+    st.markdown("💡 **快速微调**")
+    
+    cols = st.columns(3)
+    for i, preset in enumerate(INTENT_PRESETS):
+        col_idx = i % 3
+        with cols[col_idx]:
+            if st.button(preset["label"], key=f"intent_{i}"):
+                st.session_state.user_text_modifier = preset["value"]
+                st.rerun()
+
+
+# ============================================
 # Task 5: 点点 Agent 对话区
 # ============================================
 
@@ -785,6 +975,30 @@ def render_agent_chat(vibe_result: dict, use_typewriter: bool = True):
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_search_status(user_text: str, vibe_description: str, result_count: int):
+    """
+    渲染搜索状态
+    
+    Args:
+        user_text: 用户输入的文本
+        vibe_description: 风格描述
+        result_count: 检索结果数量
+    """
+    combined_query = f"{vibe_description} {user_text}".strip()
+    
+    st.markdown(f'''
+    <div class="search-status">
+        <span class="search-status-icon">✅</span>
+        <span class="search-status-text">
+            已完成语义检索 · 找到 <strong>{result_count}</strong> 条匹配笔记
+        </span>
+    </div>
+    <div style="font-size: 12px; color: #999; margin-bottom: 16px; padding: 0 12px;">
+        <strong>检索意图：</strong>{combined_query[:50]}{"..." if len(combined_query) > 50 else ""}
+    </div>
+    ''', unsafe_allow_html=True)
+
+
 # ============================================
 # 会话状态初始化
 # ============================================
@@ -810,6 +1024,12 @@ if "base_url" not in st.session_state:
 if "analysis_complete" not in st.session_state:
     st.session_state.analysis_complete = False
 
+if "user_text_modifier" not in st.session_state:
+    st.session_state.user_text_modifier = ""
+
+if "search_triggered" not in st.session_state:
+    st.session_state.search_triggered = False
+
 
 # ============================================
 # 主程序
@@ -834,6 +1054,15 @@ def main():
         </p>
     </div>
     ''', unsafe_allow_html=True)
+    
+    # ========== API 状态提示 ==========
+    is_ready, mode, config = check_api_config()
+    status_message = get_api_status_message()
+    
+    if is_ready:
+        st.success(status_message)
+    else:
+        st.info(status_message)
     
     # 双列布局
     col1, col2 = st.columns([1, 1.2], gap="large")
@@ -866,6 +1095,7 @@ def main():
                 if st.session_state.last_file_id != current_file_id:
                     st.session_state.last_file_id = current_file_id
                     st.session_state.analysis_complete = False
+                    st.session_state.search_triggered = False
                     
                     with st.spinner("🎨 點點正在分析你的風格..."):
                         # 调用分析
@@ -875,19 +1105,60 @@ def main():
                             base_url=st.session_state.base_url
                         )
                         st.session_state.vibe_result = vibe_result
-                        
-                        # 检索笔记
-                        matched_notes = get_matching_notes(
-                            vibe_tag=vibe_result["vibe_tag"],
-                            scene_keywords=vibe_result.get("scene_keywords", [])
-                        )
-                        st.session_state.recommended_notes = matched_notes
-                        st.session_state.analysis_complete = True
                     
                     st.rerun()
         
         else:
             render_empty_state()
+        
+        # ========== 图文混合搜索输入区 ==========
+        if st.session_state.vibe_result:
+            st.divider()
+            
+            # 用户文字输入
+            st.markdown("### 💬 想對點點說什麼？")
+            
+            user_text = st.text_input(
+                "补充你的需求",
+                placeholder="如：颜色再深一点、要更小户型一点、适合约会...",
+                value=st.session_state.user_text_modifier,
+                key="user_text_input",
+                label_visibility="collapsed"
+            )
+            
+            # 意图修正按钮
+            render_intent_buttons()
+            
+            # 搜索按钮
+            col_search1, col_search2 = st.columns([1, 1])
+            with col_search1:
+                search_clicked = st.button("🔍 重新搜索", use_container_width=True)
+            with col_search2:
+                clear_clicked = st.button("🗑️ 清空输入", use_container_width=True)
+            
+            if clear_clicked:
+                st.session_state.user_text_modifier = ""
+                st.rerun()
+            
+            if search_clicked:
+                st.session_state.user_text_modifier = user_text
+                st.session_state.search_triggered = True
+                
+                # 调用 V2 检索
+                vibe = st.session_state.vibe_result
+                with st.spinner("🔍 正在进行语义检索..."):
+                    matched_notes = get_matching_notes_v2(
+                        vibe_description=vibe.get("description", ""),
+                        user_text_modifier=user_text,
+                        vibe_tag=vibe.get("vibe_tag", ""),
+                        scene_keywords=vibe.get("scene_keywords", []),
+                        api_key=st.session_state.api_key,
+                        base_url=st.session_state.base_url,
+                        top_k=5
+                    )
+                    st.session_state.recommended_notes = matched_notes
+                
+                st.rerun()
         
         # AI 视觉感知区
         if st.session_state.vibe_result:
@@ -929,6 +1200,14 @@ def main():
             # 单品推荐
             st.markdown("### 🌟 穿搭推薦")
             
+            # 显示搜索状态
+            if st.session_state.search_triggered and st.session_state.recommended_notes:
+                render_search_status(
+                    st.session_state.user_text_modifier,
+                    st.session_state.vibe_result.get("description", ""),
+                    len(st.session_state.recommended_notes)
+                )
+            
             if st.session_state.recommended_notes:
                 for note in st.session_state.recommended_notes:
                     render_note_card(note, show_items=True)
@@ -950,7 +1229,7 @@ def main():
     st.markdown('''
     <div style="text-align: center; padding: 20px;">
         <span style="color: #999; font-size: 12px;">
-            💡 StyleMirror - 小紅書點點 Agent 多模態試用原型 | 
+            💡 StyleMirror v4.0 - 圖文混合搜索 + 匹配度可視化 | 
             Made with ❤️ using Streamlit
         </span>
     </div>
