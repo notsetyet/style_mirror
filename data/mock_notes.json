@@ -1,0 +1,71 @@
+[
+  {
+    "note_id": "note_001",
+    "item_img_url": "https://example.com/images/french_style_dress.jpg",
+    "vibe_tags": ["法式復古", "復古浪漫", "溫柔優雅"],
+    "caption": "復古法式穿搭 | 這套太有氛圍感了✨ 波點連衣裙+小香風外套，優雅又浪漫～秋遊約會都合適！",
+    "items": [
+      {
+        "item_name": "法式波點連衣裙",
+        "category": "連衣裙",
+        "color": "黑底白點",
+        "style": "復古法式"
+      },
+      {
+        "item_name": "小香風粗花呢外套",
+        "category": "外套",
+        "color": "米白色",
+        "style": "優雅淑女"
+      }
+    ],
+    "author": "@法式穿搭日記",
+    "likes": 12580,
+    "collects": 3256
+  },
+  {
+    "note_id": "note_002",
+    "item_img_url": "https://example.com/images/minimalist_industrial.jpg",
+    "vibe_tags": ["極簡工業", "現代簡約", "都市時尚"],
+    "caption": "極簡工業風穿搭分享 🏙️ 黑色西裝外套+高腰闊腿褲，簡約又不失個性，輕鬆打造都市時尚范兒～上班族必看！",
+    "items": [
+      {
+        "item_name": "黑色結構感西裝外套",
+        "category": "外套",
+        "color": "黑色",
+        "style": "極簡工業"
+      },
+      {
+        "item_name": "高腰闊腿西裝褲",
+        "category": "褲裝",
+        "color": "深灰色",
+        "style": "都市簡約"
+      }
+    ],
+    "author": "@極簡穿搭研究所",
+    "likes": 8960,
+    "collects": 2145
+  },
+  {
+    "note_id": "note_003",
+    "item_img_url": "https://example.com/images/warm_wood.jpg",
+    "vibe_tags": ["溫柔原木", "自然舒適", "日系森女"],
+    "caption": "溫柔原木風穿搭 🌿 棉麻襯衫+高腰闊腿褲，自然又舒適，充滿生活氣息～週末約會首選！",
+    "items": [
+      {
+        "item_name": "棉麻格紋襯衫",
+        "category": "襯衫",
+        "color": "米色",
+        "style": "溫柔原木"
+      },
+      {
+        "item_name": "高腰棉麻闊腿褲",
+        "category": "褲裝",
+        "color": "卡其色",
+        "style": "自然舒適"
+      }
+    ],
+    "author": "@森系穿搭日記",
+    "likes": 7620,
+    "collects": 1890
+  }
+]
